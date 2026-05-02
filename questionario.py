@@ -39,6 +39,7 @@ def _tools_dataframe(selected: list[SelectedTool]) -> pd.DataFrame:
     return pd.DataFrame([
         {
             "Prioridade": _priority_to_badge(item.priority),
+            "Gate": st.session_state.engine.tool_gate_label(item.tool.id) if "engine" in st.session_state else "—",
             "Categoria": item.tool.category.value,
             "ID": item.tool.id,
             "Ferramenta": item.tool.name,
@@ -58,7 +59,7 @@ def render_questionario() -> None:
     engine: MedConceptEngine = st.session_state.engine
 
     st.title("Questionário Adaptativo")
-    st.caption("Responda as perguntas. O sistema adapta o caminho e recomenda ferramentas para chegar ao conceito aprovado.")
+    st.caption("Responda as perguntas. O sistema monta um pacote mínimo inteligente, evitando excesso de ferramentas em projetos simples.")
 
     col_a, col_b, col_c = st.columns([1, 1, 2])
     with col_a:
@@ -124,17 +125,25 @@ def render_questionario() -> None:
 
 def render_resultados(engine: MedConceptEngine) -> None:
     selected = engine.apply_rules()
+    raw_candidates = engine.apply_rules_raw()
     profile = engine.profile
     grouped = engine.selected_as_groups(selected)
 
-    st.success("Questionário concluído. As ferramentas foram recomendadas com base no perfil do produto.")
+    st.success("Questionário concluído. O sistema gerou um pacote mínimo inteligente para este perfil de produto.")
 
     st.header("Resumo do Perfil")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Complexidade", profile.complexity.name)
-    c2.metric("Score", profile.complexity_score)
-    c3.metric("Ferramentas", len(selected))
-    c4.metric("Obrigatórias", len(grouped[ToolPriority.MANDATORY]))
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Rota", engine.project_route())
+    c2.metric("Complexidade", profile.complexity.name)
+    c3.metric("Score", profile.complexity_score)
+    c4.metric("Pacote", len(selected))
+    c5.metric("Candidatas", len(raw_candidates))
+
+    st.info(
+        f"O algoritmo encontrou {len(raw_candidates)} ferramentas candidatas, "
+        f"mas exibiu apenas {len(selected)} no pacote principal. "
+        "As demais ficam ocultas para auditoria e melhoria futura, sem sobrecarregar o usuário."
+    )
 
     with st.expander("Perfil multicamadas completo", expanded=True):
         p = profile
@@ -161,19 +170,30 @@ def render_resultados(engine: MedConceptEngine) -> None:
         ).sort_values(by="Pontos", ascending=False)
         st.dataframe(score_df, use_container_width=True)
 
-    st.header("Ferramentas Recomendadas")
-    tabs = st.tabs(["✅ Obrigatórias", "🔵 Recomendadas", "⚪ Opcionais", "📋 Todas"])
+    st.header("Pacote Inteligente de Ferramentas")
+    tabs = st.tabs(["🧭 Por Gate", "✅ Obrigatórias", "🔵 Recomendadas", "⚪ Opcionais", "📋 Pacote", "🧪 Candidatas ocultas"])
+
+    with tabs[0]:
+        render_tool_cards_by_gate(engine, selected)
 
     for tab, priority in zip(
-        tabs[:3],
+        tabs[1:4],
         [ToolPriority.MANDATORY, ToolPriority.RECOMMENDED, ToolPriority.OPTIONAL],
     ):
         with tab:
             render_tool_cards(grouped[priority])
 
-    with tabs[3]:
+    with tabs[4]:
         df = _tools_dataframe(selected)
         st.dataframe(df, use_container_width=True, hide_index=True)
+
+    with tabs[5]:
+        hidden = [item for item in raw_candidates if item.tool.id not in {s.tool.id for s in selected}]
+        st.caption("Ferramentas acionadas pelas regras, mas removidas da saída principal para manter o pacote enxuto.")
+        if hidden:
+            st.dataframe(_tools_dataframe(hidden), use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhuma ferramenta oculta.")
 
     st.header("Relatório e Downloads")
     report = engine.generate_report(selected)
@@ -209,6 +229,20 @@ def render_resultados(engine: MedConceptEngine) -> None:
             mime="text/csv",
             use_container_width=True,
         )
+
+
+def render_tool_cards_by_gate(engine: MedConceptEngine, items: list[SelectedTool]) -> None:
+    if not items:
+        st.info("Nenhuma ferramenta selecionada.")
+        return
+
+    by_gate: dict[int, list[SelectedTool]] = {}
+    for item in items:
+        by_gate.setdefault(engine.tool_gate(item.tool.id), []).append(item)
+
+    for gate in sorted(by_gate):
+        st.subheader(engine.tool_gate_label(by_gate[gate][0].tool.id))
+        render_tool_cards(by_gate[gate])
 
 
 def render_tool_cards(items: list[SelectedTool]) -> None:
