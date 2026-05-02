@@ -1,6 +1,6 @@
 
 """
-MED CONCEPT ENGINE v4 — Aplicativo Streamlit
+MED CONCEPT ENGINE v5 — Aplicativo Streamlit Inteligente
 Sistema Adaptativo de Desenvolvimento de Produtos Médicos
 
 Escopo:
@@ -1536,7 +1536,13 @@ class MedConceptEngine:
         ratio = 1.0 if total_dynamic == 0 else answered / total_dynamic
         return answered, total_dynamic, ratio
 
-    def apply_rules(self) -> list[SelectedTool]:
+    def apply_rules_raw(self) -> list[SelectedTool]:
+        """Aplica todas as regras e retorna todas as ferramentas candidatas.
+
+        Esta lista completa é útil para auditoria, mas não deve ser a saída principal
+        do aplicativo. A saída principal deve ser curada por perfil para evitar que
+        projetos simples recebam ferramentas demais.
+        """
         p = self.profile
         p.compute_complexity()
 
@@ -1565,8 +1571,177 @@ class MedConceptEngine:
             ToolPriority.RECOMMENDED: 1,
             ToolPriority.OPTIONAL: 2,
         }
-        result.sort(key=lambda s: (order[s.priority], s.tool.category.value, s.tool.id))
+        result.sort(key=lambda s: (order[s.priority], self.tool_gate(s.tool.id), s.tool.category.value, s.tool.id))
         return result
+
+    def project_route(self) -> str:
+        """Classifica a rota de desenvolvimento para dosar o pacote de ferramentas."""
+        p = self.profile
+        p.compute_complexity()
+
+        if p.is_radical() or p.is_platform():
+            return "Inovação alta / plataforma"
+        if p.is_innovation():
+            return "Inovação incremental"
+        if p.is_inhouse():
+            return "Internalização / nacionalização"
+        if p.is_kit_or_accessory():
+            return "Novo kit / acessório"
+        if "similar_competitor" in p.development_strategy or p.is_adaptation():
+            return "Adaptação / similar de mercado"
+        if p.is_supplier_change():
+            return "Substituição de fornecedor"
+        if p.is_oem():
+            if p.complexity.value <= ComplexityLevel.MEDIUM.value and not p.has_patient_contact and not p.sterility_required:
+                return "Rota rápida OEM / revenda"
+            return "OEM / white label"
+        return "Conceito padrão"
+
+    def recommendation_cap(self) -> int:
+        """Define limite máximo de ferramentas exibidas na saída principal."""
+        route = self.project_route()
+        caps = {
+            "Rota rápida OEM / revenda": 10,
+            "OEM / white label": 12,
+            "Substituição de fornecedor": 11,
+            "Adaptação / similar de mercado": 14,
+            "Novo kit / acessório": 14,
+            "Internalização / nacionalização": 15,
+            "Inovação incremental": 18,
+            "Inovação alta / plataforma": 24,
+            "Conceito padrão": 12,
+        }
+        return caps.get(route, 12)
+
+    def tool_gate(self, tool_id: str) -> int:
+        """Distribui ferramentas nos 5 Gates internos de idealização até conceito."""
+        if tool_id in {"NED06", "MKT01", "MKT04", "IDE08"}:
+            return 1
+        if tool_id.startswith("NED") or tool_id in {"REG02", "REG03", "REG04", "REQ02"}:
+            return 2
+        if (tool_id.startswith("OEM") or tool_id.startswith("SUP") or tool_id.startswith("KIT")
+                or tool_id.startswith("ADP") or tool_id.startswith("INT")
+                or tool_id in {"REG01", "REG06", "REG07", "REG08", "REG09", "REG10"}):
+            return 3
+        if tool_id.startswith("IDE") or tool_id.startswith("MKT") or tool_id in {"CON01", "CON03", "CON04", "CON05"}:
+            return 4
+        return 5
+
+    def tool_gate_label(self, tool_id: str) -> str:
+        labels = {
+            1: "Gate 1 — Triagem da oportunidade",
+            2: "Gate 2 — Validação da necessidade",
+            3: "Gate 3 — Estratégia conceitual",
+            4: "Gate 4 — Geração e seleção",
+            5: "Gate 5 — Conceito final aprovado",
+        }
+        return labels[self.tool_gate(tool_id)]
+
+    def _tool_priority_score(self, item: SelectedTool) -> int:
+        """Pontua relevância para curadoria inteligente."""
+        p = self.profile
+        route = self.project_route()
+        score = 0
+
+        if item.priority == ToolPriority.MANDATORY:
+            score += 100
+        elif item.priority == ToolPriority.RECOMMENDED:
+            score += 55
+        else:
+            score += 15
+
+        # Núcleo de fechamento do conceito: importante, mas não pode dominar toda a lista.
+        if item.tool.id in {"CON02", "OUT01", "OUT07"}:
+            score += 35
+        if item.tool.id in {"REG02", "REG03", "REG04"}:
+            score += 20
+
+        # Ajustes por rota.
+        route_keywords = {
+            "Rota rápida OEM / revenda": {"OEM01", "OEM02", "OEM03", "OEM05", "MKT01", "MKT05", "CON03"},
+            "OEM / white label": {"OEM01", "OEM02", "OEM03", "OEM05", "OEM06", "OEM07", "MKT01", "MKT05", "CON03"},
+            "Substituição de fornecedor": {"SUP01", "SUP02", "SUP03", "SUP04", "MKT05", "REG10", "CON03"},
+            "Adaptação / similar de mercado": {"ADP01", "ADP02", "ADP03", "ADP06", "MKT01", "MKT02", "REG10", "CON01"},
+            "Novo kit / acessório": {"KIT01", "KIT02", "KIT03", "KIT04", "KIT05", "REG10", "REG08", "REG09"},
+            "Internalização / nacionalização": {"INT01", "INT02", "INT03", "INT05", "INT07", "OEM08", "MKT05", "CON03"},
+            "Inovação incremental": {"NED01", "NED03", "IDE01", "IDE02", "IDE06", "MKT02", "REQ02", "REQ03", "CON01", "CON05"},
+            "Inovação alta / plataforma": {"NED01", "NED03", "NED05", "IDE01", "IDE04", "IDE06", "IDE07", "MKT02", "MKT03", "REQ03", "REQ04", "CON01", "CON05"},
+        }
+        if item.tool.id in route_keywords.get(route, set()):
+            score += 45
+
+        # Evita ferramentas muito pesadas em rota rápida.
+        if route == "Rota rápida OEM / revenda" and item.tool.id in {"IDE04", "IDE06", "IDE07", "REQ04", "CON04", "CON05"}:
+            score -= 200
+
+        # Alertas conceituais entram apenas se realmente acionados.
+        if item.tool.id in {"REG07", "REG08", "REG09"} and (p.has_patient_contact or p.sterility_required or p.sterility_unknown):
+            score += 25
+
+        return score
+
+    def _ensure_tool(self, raw_by_id: dict[str, SelectedTool], tool_id: str, priority: ToolPriority, reason: str) -> SelectedTool | None:
+        if tool_id in raw_by_id:
+            item = raw_by_id[tool_id]
+            # Mantém a justificativa original, mas permite elevar prioridade quando for núcleo do pacote.
+            if priority == ToolPriority.MANDATORY and item.priority != ToolPriority.MANDATORY:
+                return SelectedTool(item.tool, priority, item.reason)
+            return item
+        if tool_id not in TOOL_LIBRARY:
+            return None
+        return SelectedTool(TOOL_LIBRARY[tool_id], priority, reason)
+
+    def _curate_tools(self, raw: list[SelectedTool]) -> list[SelectedTool]:
+        """Reduz a lista completa para um pacote mínimo e inteligente."""
+        p = self.profile
+        route = self.project_route()
+        cap = self.recommendation_cap()
+        raw_by_id = {item.tool.id: item for item in raw}
+
+        # Núcleo mínimo: suficiente para documentar e transferir o conceito sem carregar o usuário.
+        if route == "Rota rápida OEM / revenda":
+            core_ids = ["REG02", "REG03", "REG04", "OEM01", "OEM02", "MKT01", "CON03", "CON02", "OUT01", "OUT07"]
+        elif route in {"OEM / white label", "Substituição de fornecedor"}:
+            core_ids = ["REG02", "REG03", "REG04", "REG01", "MKT01", "CON03", "CON02", "OUT01", "OUT07"]
+        elif route in {"Inovação incremental", "Inovação alta / plataforma"}:
+            core_ids = ["NED01", "NED03", "IDE01", "REG02", "REG03", "REG04", "REQ01", "CON01", "CON02", "OUT01", "OUT04", "OUT07"]
+        else:
+            core_ids = ["REG02", "REG03", "REG04", "REQ01", "CON02", "OUT01", "OUT04", "OUT07"]
+
+        selected: list[SelectedTool] = []
+        selected_ids: set[str] = set()
+
+        for tid in core_ids:
+            item = self._ensure_tool(
+                raw_by_id, tid, ToolPriority.MANDATORY,
+                "Ferramenta núcleo do pacote mínimo para esta rota de desenvolvimento."
+            )
+            if item and tid not in selected_ids:
+                selected.append(item)
+                selected_ids.add(tid)
+
+        # Candidatos restantes: exclui opcionais por padrão para a saída principal.
+        candidates = [
+            item for item in raw
+            if item.tool.id not in selected_ids and item.priority != ToolPriority.OPTIONAL
+        ]
+        candidates.sort(key=lambda item: (-self._tool_priority_score(item), self.tool_gate(item.tool.id), item.tool.id))
+
+        for item in candidates:
+            if len(selected) >= cap:
+                break
+            selected.append(item)
+            selected_ids.add(item.tool.id)
+
+        # Ordena por Gate e por prioridade, para ficar didático.
+        priority_order = {ToolPriority.MANDATORY: 0, ToolPriority.RECOMMENDED: 1, ToolPriority.OPTIONAL: 2}
+        selected.sort(key=lambda item: (self.tool_gate(item.tool.id), priority_order[item.priority], item.tool.id))
+        return selected
+
+    def apply_rules(self) -> list[SelectedTool]:
+        """Retorna o pacote inteligente principal, não a lista completa."""
+        raw = self.apply_rules_raw()
+        return self._curate_tools(raw)
 
     def selected_as_groups(self, selected: list[SelectedTool]) -> dict[ToolPriority, list[SelectedTool]]:
         grouped = {
@@ -1607,7 +1782,9 @@ class MedConceptEngine:
 
         h1("MED CONCEPT ENGINE — CONCEPT REPORT")
         lines.append(f"  Gerado em : {now}")
-        lines.append("  Versão    : Aplicativo Streamlit — Motor por Regras")
+        lines.append("  Versão    : Aplicativo Streamlit — Pacote Inteligente")
+        lines.append(f"  Rota      : {self.project_route()}")
+        lines.append(f"  Limite    : até {self.recommendation_cap()} ferramentas na saída principal")
 
         h2("PERFIL MULTICAMADAS DO PROJETO")
         row("Estratégias de Desenvolvimento:", ", ".join(p.development_strategy) or "—")
@@ -1638,7 +1815,7 @@ class MedConceptEngine:
             lines.append(f"  {factor:<42} {pts:2d} pts  {bar}")
 
         grouped = self.selected_as_groups(selected)
-        h2(f"FERRAMENTAS RECOMENDADAS — {len(selected)} no total")
+        h2(f"PACOTE INTELIGENTE — {len(selected)} ferramentas selecionadas")
         lines.append(f"  ✅ Obrigatórias : {len(grouped[ToolPriority.MANDATORY])}")
         lines.append(f"  🔵 Recomendadas : {len(grouped[ToolPriority.RECOMMENDED])}")
         lines.append(f"  ⚪ Opcionais    : {len(grouped[ToolPriority.OPTIONAL])}")
@@ -1663,6 +1840,7 @@ class MedConceptEngine:
                 for s in items:
                     lines.append("")
                     lines.append(f"      [{s.tool.id}] {s.tool.name}")
+                    lines.append(f"          Gate: {self.tool_gate_label(s.tool.id)}")
                     desc = textwrap.fill(s.tool.description, width=w - 12, subsequent_indent=" " * 12)
                     reason = textwrap.fill(f"↳ {s.reason}", width=w - 12, subsequent_indent=" " * 14)
                     lines.append(f"          📋 {desc}")
@@ -1694,7 +1872,7 @@ class MedConceptEngine:
 
         return {
             "generated_at": datetime.now().isoformat(),
-            "engine_version": "v4-streamlit-rule-based",
+            "engine_version": "v5-smart-curated",
             "project_profile": {
                 "development_strategy": p.development_strategy,
                 "company_responsibility": p.company_responsibility,
@@ -1718,6 +1896,9 @@ class MedConceptEngine:
                 "complexity": p.complexity.name,
                 "complexity_score": p.complexity_score,
                 "score_breakdown": p.score_breakdown,
+                "project_route": self.project_route(),
+                "recommendation_cap": self.recommendation_cap(),
+                "raw_candidate_count": len(self.apply_rules_raw()),
             },
             "tools": [
                 {
@@ -1726,6 +1907,8 @@ class MedConceptEngine:
                     "category": s.tool.category.value,
                     "priority": s.priority.name,
                     "priority_label": s.priority.value,
+                    "gate": self.tool_gate(s.tool.id),
+                    "gate_label": self.tool_gate_label(s.tool.id),
                     "description": s.tool.description,
                     "reason": s.reason,
                 }
