@@ -78,13 +78,13 @@ def render_inicio() -> None:
             <h1>Med Concept Engine</h1>
             <p style="font-size: 1.15rem;">
                 Sistema adaptativo para apoiar a fase de idealização e seleção de conceito
-                em novos produtos médicos.
+                em novos produtos médicos, com pacote mínimo inteligente de ferramentas.
             </p>
             <p>
                 A ferramenta classifica o produto por estratégia de desenvolvimento, responsabilidade
                 da empresa, contato com paciente, esterilidade, fornecedor, inovação, regulatório,
-                fabricação e incertezas. Ao final, recomenda as ferramentas adequadas para chegar
-                ao conceito aprovado e preparar a entrega ao time de projeto.
+                rota produtiva conceitual e incertezas. Ao final, recomenda apenas um pacote enxuto de ferramentas, calibrado conforme
+                a rota do produto: OEM rápido, adaptação, fornecedor, kit, internalização ou inovação.
             </p>
         </div>
         """,
@@ -109,9 +109,8 @@ def render_inicio() -> None:
         st.markdown(
             """
             <div class="small-card">
-                <h3>2. Motor de regras</h3>
-                <p>As respostas acionam ferramentas específicas com prioridade e justificativa,
-                em vez de usar apenas uma classificação simples.</p>
+                <h3>2. Pacote inteligente</h3>
+                <p>As regras encontram ferramentas candidatas, mas o app mostra só o pacote mínimo necessário para cada rota.</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -133,7 +132,7 @@ def render_inicio() -> None:
     st.markdown(
         """
         **Tela inicial** → **Questionário adaptativo** → **Perfil multicamadas** →
-        **Ferramentas recomendadas** → **Concept Report** → **Pacote de transferência ao projeto**
+        **Pacote inteligente por Gate** → **Concept Report** → **Pacote de transferência ao projeto**
         """
     )
 
