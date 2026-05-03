@@ -50,9 +50,10 @@ def normalizar(texto: object) -> str:
 
 def is_go_no_go_tool_id(tool_id: str, tool_name: str = "") -> bool:
     texto = f"{tool_id} {tool_name}".lower()
+
     return any(
-        t in texto
-        for t in [
+        termo in texto
+        for termo in [
             "gonogo",
             "go/no-go",
             "go / no-go",
@@ -67,6 +68,7 @@ def is_go_no_go_tool_id(tool_id: str, tool_name: str = "") -> bool:
 def to_excel_date(value: date | datetime) -> datetime:
     if isinstance(value, datetime):
         return value
+
     return datetime(value.year, value.month, value.day)
 
 
@@ -261,12 +263,21 @@ def ler_banco_ferramentas(wb) -> list[dict]:
             {
                 "row": row,
                 "codigo": str(codigo),
-                "ferramenta": str(ws.cell(row=row, column=col_ferramenta).value)
-                if col_ferramenta else "",
-                "gate": str(ws.cell(row=row, column=col_gate).value)
-                if col_gate else "",
-                "aba": str(ws.cell(row=row, column=col_aba).value)
-                if col_aba and ws.cell(row=row, column=col_aba).value else "",
+                "ferramenta": (
+                    str(ws.cell(row=row, column=col_ferramenta).value)
+                    if col_ferramenta
+                    else ""
+                ),
+                "gate": (
+                    str(ws.cell(row=row, column=col_gate).value)
+                    if col_gate
+                    else ""
+                ),
+                "aba": (
+                    str(ws.cell(row=row, column=col_aba).value)
+                    if col_aba and ws.cell(row=row, column=col_aba).value
+                    else ""
+                ),
             }
         )
 
@@ -336,7 +347,11 @@ def preencher_banco_ferramentas(wb, codigos_selecionados: set[str]) -> None:
             headers[normalizar(value)] = col
 
     col_codigo = headers.get("codigo") or headers.get("cod") or headers.get("id") or 1
-    col_status = headers.get("selecionar") or headers.get("selecionada") or headers.get("status")
+    col_status = (
+        headers.get("selecionar")
+        or headers.get("selecionada")
+        or headers.get("status")
+    )
 
     if not col_status:
         col_status = ws.max_column + 1
@@ -747,20 +762,20 @@ def preencher_relatorio_consolidado(
 
 
 # =============================================================================
-# FUNÇÃO PRINCIPAL DE GERAÇÃO
+# OCULTAÇÃO DE ABAS
 # =============================================================================
 
 def ocultar_abas_nao_aplicaveis(wb, abas_para_manter: set[str]) -> list[str]:
     """
     Oculta abas não aplicáveis em vez de deletar.
 
-    Isso evita corrupção do arquivo Excel quando a planilha-mãe possui:
-    - tabelas estruturadas;
+    Isso evita erro de recuperação do Excel causado por:
+    - referências internas quebradas;
+    - fórmulas entre abas;
     - validações de dados;
-    - nomes definidos;
-    - fórmulas;
+    - tabelas estruturadas;
     - gráficos;
-    - referências entre abas.
+    - nomes definidos.
     """
     abas_visiveis = []
 
@@ -773,12 +788,16 @@ def ocultar_abas_nao_aplicaveis(wb, abas_para_manter: set[str]) -> list[str]:
         else:
             ws.sheet_state = "hidden"
 
-    # Garante que pelo menos uma aba fique visível.
     if not abas_visiveis and wb.sheetnames:
         wb[wb.sheetnames[0]].sheet_state = "visible"
         abas_visiveis.append(wb.sheetnames[0])
 
     return abas_visiveis
+
+
+# =============================================================================
+# FUNÇÃO PRINCIPAL DE GERAÇÃO
+# =============================================================================
 
 def gerar_planilha_projeto(
     template_path: str | Path,
@@ -812,7 +831,6 @@ def gerar_planilha_projeto(
 
     for item in selected_tools:
         codigo = item.tool.id
-
         aba_do_banco = ""
 
         for registro in banco:
@@ -873,18 +891,15 @@ def gerar_planilha_projeto(
         engine=engine,
     )
 
-    for aba in list(wb.sheetnames):
-        if aba not in abas_para_manter and len(wb.sheetnames) > 1:
-            del wb[aba]
-
-    abas_existentes_para_manter = [
-        aba for aba in wb.sheetnames
-        if aba in abas_para_manter
-    ]
+    abas_existentes_para_manter = ocultar_abas_nao_aplicaveis(
+        wb,
+        abas_para_manter,
+    )
 
     preencher_indice(wb, abas_existentes_para_manter)
 
     if "Dashboard" in wb.sheetnames:
+        wb["Dashboard"].sheet_state = "visible"
         wb.active = wb.sheetnames.index("Dashboard")
 
     output = BytesIO()
