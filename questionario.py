@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
+from datetime import date
 
 import pandas as pd
 import streamlit as st
-
-from pathlib import Path
-from datetime import date
 
 from excel_generator import gerar_planilha_projeto
 
@@ -92,7 +91,10 @@ def _compact_tools_dataframe(selected: list[SelectedTool]) -> pd.DataFrame:
     ])
 
 
-def _hidden_tools_dataframe(engine: MedConceptEngine, hidden: list[SelectedTool]) -> pd.DataFrame:
+def _hidden_tools_dataframe(
+    engine: MedConceptEngine,
+    hidden: list[SelectedTool],
+) -> pd.DataFrame:
     """
     Tabela interna para desenvolvedor.
     Aqui ainda mostramos categoria e prioridade para análise das regras.
@@ -228,7 +230,8 @@ def render_resultados(engine: MedConceptEngine) -> None:
     - Remove justificativas da tabela principal.
     - Remove Go/No-Go da lista visual de ferramentas.
     - Candidatas ocultas só aparecem se usuário confirmar que é desenvolvedor.
-    - Mantém Relatório e Downloads.
+    - Mostra corretamente a área de geração da planilha do projeto.
+    - Mantém relatório TXT, JSON e CSV.
     """
     selected_all = engine.apply_rules()
     raw_candidates_all = engine.apply_rules_raw()
@@ -240,6 +243,9 @@ def render_resultados(engine: MedConceptEngine) -> None:
 
     st.success("Questionário concluído.")
 
+    # -------------------------------------------------------------------------
+    # SCORE DE COMPLEXIDADE
+    # -------------------------------------------------------------------------
     with st.expander("Score de complexidade", expanded=True):
         st.markdown(
             f"""
@@ -259,6 +265,9 @@ def render_resultados(engine: MedConceptEngine) -> None:
             height=min(360, 42 + 36 * len(score_df)),
         )
 
+    # -------------------------------------------------------------------------
+    # PACOTE DE FERRAMENTAS
+    # -------------------------------------------------------------------------
     st.header("Pacote de Ferramentas")
 
     tabs = st.tabs(["🧭 Gates", "🔎 Candidatas ocultas"])
@@ -297,9 +306,19 @@ def render_resultados(engine: MedConceptEngine) -> None:
             else:
                 st.info("Nenhuma ferramenta oculta.")
         else:
-            st.info("As ferramentas candidatas ocultas são exibidas apenas para revisão interna.")
+            st.info(
+                "As ferramentas candidatas ocultas são exibidas apenas para revisão interna."
+            )
 
-        st.subheader("Planilha do Projeto")
+    # -------------------------------------------------------------------------
+    # RELATÓRIO E DOWNLOADS
+    # -------------------------------------------------------------------------
+    st.header("Relatório e Downloads")
+
+    # -------------------------------------------------------------------------
+    # PLANILHA DO PROJETO
+    # -------------------------------------------------------------------------
+    st.subheader("Planilha do Projeto")
 
     with st.container(border=True):
         nome_cronograma = st.text_input(
@@ -343,21 +362,31 @@ def render_resultados(engine: MedConceptEngine) -> None:
             / "Planilha_Mae_Inteligente_Com_Cronograma.xlsx"
         )
 
-        campos_ok = all([
-            nome_cronograma.strip(),
-            nome_projeto.strip(),
-            nome_produto.strip(),
-            data_inicio,
-            data_fim,
-        ])
+        campos_ok = all(
+            [
+                nome_cronograma.strip(),
+                nome_projeto.strip(),
+                nome_produto.strip(),
+                data_inicio,
+                data_fim,
+            ]
+        )
 
-        if data_fim < data_inicio:
+        if not template_path.exists():
+            st.error(
+                "Planilha-mãe não encontrada. Verifique se o arquivo está em: "
+                "`templates/Planilha_Mae_Inteligente_Com_Cronograma.xlsx`"
+            )
+
+        elif data_fim < data_inicio:
             st.error("A data final não pode ser anterior à data de início.")
+
         elif not campos_ok:
             st.info(
                 "Informe nome do cronograma, nome do projeto, nome base do produto, "
                 "data de início e data final para gerar a planilha personalizada."
             )
+
         else:
             try:
                 planilha_bytes, nome_arquivo = gerar_planilha_projeto(
@@ -378,15 +407,19 @@ def render_resultados(engine: MedConceptEngine) -> None:
                     label="📗 Baixar planilha do projeto",
                     data=planilha_bytes,
                     file_name=nome_arquivo,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument."
+                        "spreadsheetml.sheet"
+                    ),
                     use_container_width=True,
                 )
 
             except Exception as exc:
                 st.error(f"Erro ao gerar planilha do projeto: {exc}")
 
-    # Relatório e JSON seguem o pacote visível, sem Go/No-Go como ferramenta comum.
-    # As matrizes Go/No-Go devem entrar futuramente como seção própria do relatório.
+    # -------------------------------------------------------------------------
+    # RELATÓRIO TXT, JSON E CSV
+    # -------------------------------------------------------------------------
     report = engine.generate_report(selected)
     json_data = engine.export_json_string(selected)
 
