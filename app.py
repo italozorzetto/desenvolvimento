@@ -1,12 +1,15 @@
-
 from __future__ import annotations
+
+from pathlib import Path
 
 import streamlit as st
 
 from questionario import render_questionario
 
 
-APP_TITLE = "Med Concept Engine"
+APP_TITLE = "Gestor de Conceitos Médicos"
+APP_SUBTITLE = "Idealização → Conceito Aprovado"
+LOGO_PATH = Path("logo-msb.png")
 
 
 def configurar_pagina() -> None:
@@ -23,18 +26,46 @@ def configurar_pagina() -> None:
         .main .block-container {
             padding-top: 2rem;
             padding-bottom: 3rem;
+            max-width: 1250px;
         }
+
         .hero-card {
-            padding: 2rem;
+            padding: 2.4rem;
             border-radius: 18px;
             border: 1px solid rgba(120,120,120,0.25);
             background: linear-gradient(135deg, rgba(47,111,237,0.10), rgba(47,111,237,0.02));
         }
-        .small-card {
-            padding: 1.2rem;
-            border-radius: 14px;
-            border: 1px solid rgba(120,120,120,0.22);
-            height: 100%;
+
+        .hero-card h1 {
+            font-size: 2.8rem;
+            margin-bottom: 1.2rem;
+            color: #1f2937;
+        }
+
+        .hero-card p {
+            font-size: 1.08rem;
+            line-height: 1.7;
+            color: #111827;
+        }
+
+        .sidebar-logo {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 0.6rem;
+        }
+
+        div[data-testid="stSidebar"] {
+            background-color: #f3f6fa;
+        }
+
+        div[data-testid="stSidebar"] h1 {
+            font-size: 1.35rem;
+            line-height: 1.3;
+        }
+
+        div.stButton > button {
+            border-radius: 10px;
+            height: 2.8rem;
         }
         </style>
         """,
@@ -49,8 +80,15 @@ def inicializar_estado() -> None:
 
 def render_sidebar() -> None:
     with st.sidebar:
-        st.title("🩺 Med Concept")
-        st.caption("Idealização → Conceito Aprovado")
+        if LOGO_PATH.exists():
+            st.image(str(LOGO_PATH), use_container_width=True)
+        else:
+            st.warning("Logo não encontrado: logo-msb.png")
+
+        st.title("Gestor de Conceitos")
+        st.caption(APP_SUBTITLE)
+
+        st.write("")
 
         if st.button("🏠 Tela inicial", use_container_width=True):
             st.session_state.page = "inicio"
@@ -60,31 +98,28 @@ def render_sidebar() -> None:
             st.session_state.page = "questionario"
             st.rerun()
 
-        st.divider()
-        st.markdown("**Estrutura do app**")
-        st.markdown(
-            """
-            - `app.py`: tela inicial e navegação  
-            - `questionario.py`: questionário adaptativo  
-            - `med_concept_engine.py`: regras, perguntas e relatório  
-            """
-        )
-
 
 def render_inicio() -> None:
     st.markdown(
         """
         <div class="hero-card">
-            <h1>Med Concept Engine</h1>
-            <p style="font-size: 1.15rem;">
-                Sistema adaptativo para apoiar a fase de idealização e seleção de conceito
-                em novos produtos médicos, com pacote mínimo inteligente de ferramentas.
-            </p>
+            <h1>Gestor de Conceitos Médicos</h1>
+
             <p>
-                A ferramenta classifica o produto por estratégia de desenvolvimento, responsabilidade
-                da empresa, contato com paciente, esterilidade, fornecedor, inovação, regulatório,
-                rota produtiva conceitual e incertezas. Ao final, recomenda apenas um pacote enxuto de ferramentas, calibrado conforme
-                a rota do produto: OEM rápido, adaptação, fornecedor, kit, internalização ou inovação.
+                Sistema adaptativo para apoiar a fase de idealização, análise inicial
+                e seleção de conceito em novos produtos médicos.
+            </p>
+
+            <p>
+                A ferramenta classifica o produto conforme sua estratégia de desenvolvimento,
+                origem da oportunidade, responsabilidade da empresa, contato com paciente,
+                esterilidade, fornecedor, nível de inovação, rota conceitual e principais
+                incertezas.
+            </p>
+
+            <p>
+                Ao final, o sistema recomenda um pacote enxuto de ferramentas para apoiar
+                a tomada de decisão, sem entrar na fase de projeto detalhado.
             </p>
         </div>
         """,
@@ -92,55 +127,6 @@ def render_inicio() -> None:
     )
 
     st.write("")
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown(
-            """
-            <div class="small-card">
-                <h3>1. Triagem do produto</h3>
-                <p>Identifica se é OEM, white label, adaptação, novo kit, acessório,
-                inovação, internalização ou substituição de fornecedor.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with c2:
-        st.markdown(
-            """
-            <div class="small-card">
-                <h3>2. Pacote inteligente</h3>
-                <p>As regras encontram ferramentas candidatas, mas o app mostra só o pacote mínimo necessário para cada rota.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with c3:
-        st.markdown(
-            """
-            <div class="small-card">
-                <h3>3. Entrega ao projeto</h3>
-                <p>Gera ferramentas recomendadas, relatório TXT, JSON estruturado e CSV
-                para uso na próxima etapa.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.write("")
-    st.subheader("Fluxo da ferramenta")
-    st.markdown(
-        """
-        **Tela inicial** → **Questionário adaptativo** → **Perfil multicamadas** →
-        **Pacote inteligente por Gate** → **Concept Report** → **Pacote de transferência ao projeto**
-        """
-    )
-
-    st.info(
-        "O escopo termina no conceito aprovado. A fase posterior de projeto detalhado, "
-        "FMEA completo, gerenciamento formal de risco, cálculos, verificação e validação "
-        "deve ficar com o time de projeto."
-    )
 
     if st.button("🚀 Iniciar questionário", type="primary", use_container_width=True):
         st.session_state.page = "questionario"
