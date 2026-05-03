@@ -1,7 +1,5 @@
-
 from __future__ import annotations
 
-import json
 from io import StringIO
 
 import pandas as pd
@@ -9,9 +7,9 @@ import streamlit as st
 
 from med_concept_engine import (
     MedConceptEngine,
-    ToolPriority,
-    ToolCategory,
     SelectedTool,
+    ToolCategory,
+    ToolPriority,
 )
 
 
@@ -28,33 +26,26 @@ def reset_questionnaire() -> None:
 
 
 def _priority_to_badge(priority: ToolPriority) -> str:
-    if priority == ToolPriority.MANDATORY:
-        return "✅ Obrigatória"
-    if priority == ToolPriority.RECOMMENDED:
-        return "🔵 Recomendada"
-    return "⚪ Opcional"
+    return priority.value
 
 
-def _tools_dataframe(selected: list[SelectedTool]) -> pd.DataFrame:
+def _tools_dataframe(engine: MedConceptEngine, selected: list[SelectedTool]) -> pd.DataFrame:
     return pd.DataFrame([
         {
+            "Gate": engine.tool_gate_label(item.tool.id),
             "Prioridade": _priority_to_badge(item.priority),
-            "Gate": st.session_state.engine.tool_gate_label(item.tool.id) if "engine" in st.session_state else "—",
             "Categoria": item.tool.category.value,
             "ID": item.tool.id,
             "Ferramenta": item.tool.name,
             "Justificativa": item.reason,
+            "Subferramentas": ", ".join(item.tool.subtools) if item.tool.subtools else "—",
         }
         for item in selected
     ])
 
 
 def render_questionario() -> None:
-    """Renderiza o questionário adaptativo e os resultados.
-
-    Esta função é chamada pelo app.py. Assim, a tela inicial fica separada
-    e o questionário fica isolado como um módulo.
-    """
+    """Renderiza o questionário adaptativo e os resultados."""
     init_engine()
     engine: MedConceptEngine = st.session_state.engine
 
@@ -66,6 +57,7 @@ def render_questionario() -> None:
     with col_b:
         if st.button("🏠 Voltar ao início", use_container_width=True):
             st.session_state.page = "inicio"
+            st.session_state.last_error = ""
             st.rerun()
 
     answered, total, progress = engine.progress()
@@ -76,26 +68,22 @@ def render_questionario() -> None:
         st.error(st.session_state.last_error)
 
     current = engine.get_current_question()
-
     if current is None:
         render_resultados(engine)
         return
 
-    # Mostra somente o texto da pergunta, sem Q01, Q02 etc.
     st.subheader(current.text)
-
     if current.help_text:
         st.info(current.help_text)
 
     with st.form(key=f"form_{current.id}", clear_on_submit=False):
         if current.multiple:
-            selected_labels = st.multiselect(
+            answer_value = st.multiselect(
                 "Selecione uma ou mais opções:",
                 options=list(current.options.keys()),
                 format_func=lambda key: f"{key}) {current.options[key]}",
                 key=f"answer_{current.id}",
             )
-            answer_value = selected_labels
         else:
             answer_value = st.radio(
                 "Selecione uma opção:",
@@ -115,9 +103,9 @@ def render_questionario() -> None:
             st.session_state.last_error = str(exc)
             st.rerun()
 
-    with st.expander("Ver respostas já registradas"):
+    with st.expander("Ver respostas já registradas", expanded=False):
         if engine.profile.raw_answers:
-            st.dataframe(pd.DataFrame(engine.profile.raw_answers), use_container_width=True)
+            st.dataframe(pd.DataFrame(engine.profile.raw_answers), use_container_width=True, hide_index=True)
         else:
             st.write("Nenhuma resposta registrada ainda.")
 
@@ -128,7 +116,7 @@ def render_resultados(engine: MedConceptEngine) -> None:
     profile = engine.profile
     grouped = engine.selected_as_groups(selected)
 
-    st.success("Questionário concluído. O sistema gerou um pacote mínimo inteligente para este perfil de produto.")
+    st.success("Questionário concluído. O sistema gerou um pacote inteligente para este perfil de produto.")
 
     st.header("Resumo do Perfil")
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -140,16 +128,17 @@ def render_resultados(engine: MedConceptEngine) -> None:
 
     st.info(
         f"O algoritmo encontrou {len(raw_candidates)} ferramentas candidatas, "
-        f"mas exibiu apenas {len(selected)} no pacote principal. "
-        "As demais ficam ocultas para auditoria e melhoria futura, sem sobrecarregar o usuário."
+        f"mas exibiu {len(selected)} no pacote principal, respeitando o limite de "
+        f"até {engine.recommendation_cap()} ferramentas para esta rota."
     )
 
-    with st.expander("Perfil multicamadas completo", expanded=True):
+    with st.expander("Perfil multicamadas completo", expanded=False):
         p = profile
         data = {
             "Estratégias": ", ".join(p.development_strategy) or "—",
             "Responsabilidades": ", ".join(p.company_responsibility) or "—",
             "Origem": p.project_origin or "—",
+            "Classe regulatória": p.regulatory_class.name,
             "Usuário principal": p.user_type or "—",
             "Contato com paciente": "Sim" if p.has_patient_contact else "Não",
             "Invasividade": f"{p.invasiveness_level}/4",
@@ -157,6 +146,7 @@ def render_resultados(engine: MedConceptEngine) -> None:
             "Esterilidade indefinida": "Sim" if p.sterility_unknown else "Não",
             "Componente digital": "Sim" if p.has_digital_component else "Não",
             "Medicamento/fluido associado": "Sim" if p.has_associated_drug else "Não",
+            "Uso crítico": "Sim" if p.critical_use else "Não",
             "Multi-stakeholder": "Sim" if p.multi_stakeholder else "Não",
             "Incerteza regulatória": p.regulatory_uncertainty or "—",
             "Incertezas de conceito": ", ".join(p.concept_uncertainties) or "nenhuma",
@@ -167,10 +157,18 @@ def render_resultados(engine: MedConceptEngine) -> None:
         score_df = pd.DataFrame(
             [{"Fator": k, "Pontos": v} for k, v in profile.score_breakdown.items()]
         ).sort_values(by="Pontos", ascending=False)
-        st.dataframe(score_df, use_container_width=True)
+        st.dataframe(score_df, use_container_width=True, hide_index=True)
 
     st.header("Pacote Inteligente de Ferramentas")
-    tabs = st.tabs(["🧭 Por Gate", "✅ Obrigatórias", "🔵 Recomendadas", "⚪ Opcionais", "📋 Pacote", "🧪 Candidatas ocultas"])
+    tabs = st.tabs([
+        "🧭 Por Gate",
+        "✅ Obrigatórias",
+        "🔵 Recomendadas",
+        "⚪ Opcionais",
+        "📋 Pacote",
+        "🧪 Candidatas ocultas",
+        "🧾 Go/No-Go",
+    ])
 
     with tabs[0]:
         render_tool_cards_by_gate(engine, selected)
@@ -183,24 +181,28 @@ def render_resultados(engine: MedConceptEngine) -> None:
             render_tool_cards(grouped[priority])
 
     with tabs[4]:
-        df = _tools_dataframe(selected)
+        df = _tools_dataframe(engine, selected)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
     with tabs[5]:
-        hidden = [item for item in raw_candidates if item.tool.id not in {s.tool.id for s in selected}]
+        selected_ids = {item.tool.id for item in selected}
+        hidden = [item for item in raw_candidates if item.tool.id not in selected_ids]
         st.caption("Ferramentas acionadas pelas regras, mas removidas da saída principal para manter o pacote enxuto.")
         if hidden:
-            st.dataframe(_tools_dataframe(hidden), use_container_width=True, hide_index=True)
+            st.dataframe(_tools_dataframe(engine, hidden), use_container_width=True, hide_index=True)
         else:
             st.info("Nenhuma ferramenta oculta.")
+
+    with tabs[6]:
+        render_go_no_go(engine)
 
     st.header("Relatório e Downloads")
     report = engine.generate_report(selected)
     json_data = engine.export_json_string(selected)
     csv_buffer = StringIO()
-    _tools_dataframe(selected).to_csv(csv_buffer, index=False, sep=";")
+    _tools_dataframe(engine, selected).to_csv(csv_buffer, index=False, sep=";")
 
-    with st.expander("Prévia do Concept Report", expanded=False):
+    with st.expander("Prévia do relatório consolidado", expanded=False):
         st.text_area("Relatório", report, height=500)
 
     d1, d2, d3 = st.columns(3)
@@ -208,7 +210,7 @@ def render_resultados(engine: MedConceptEngine) -> None:
         st.download_button(
             label="📄 Baixar relatório TXT",
             data=report.encode("utf-8"),
-            file_name="concept_report.txt",
+            file_name="relatorio_conceito.txt",
             mime="text/plain",
             use_container_width=True,
         )
@@ -216,7 +218,7 @@ def render_resultados(engine: MedConceptEngine) -> None:
         st.download_button(
             label="📦 Baixar JSON",
             data=json_data.encode("utf-8"),
-            file_name="concept_report.json",
+            file_name="relatorio_conceito.json",
             mime="application/json",
             use_container_width=True,
         )
@@ -257,6 +259,25 @@ def render_tool_cards(items: list[SelectedTool]) -> None:
         st.subheader(category.value)
         for item in tools:
             with st.container(border=True):
-                st.markdown(f"**[{item.tool.id}] {item.tool.name}**")
+                st.markdown(f"**{item.tool.name}**")
                 st.write(item.tool.description)
+                if item.tool.subtools:
+                    st.caption("Subferramentas: " + ", ".join(item.tool.subtools))
                 st.caption(f"Justificativa: {item.reason}")
+
+
+def render_go_no_go(engine: MedConceptEngine) -> None:
+    for gate in range(1, 6):
+        matrix = engine.gate_matrix(gate)
+        st.subheader(f"Matriz Go/No-Go — Gate {gate}")
+        st.caption(engine.tool_gate_label(f"G{gate}_"))
+        st.dataframe(pd.DataFrame(matrix["rows"]), use_container_width=True, hide_index=True)
+        decision = matrix["decision"]
+        if decision.startswith("Go"):
+            st.success(f"Decisão: {decision}")
+        elif decision == "Revisar":
+            st.warning("Decisão: Revisar")
+        elif decision == "Pausar":
+            st.info("Decisão: Pausar")
+        else:
+            st.error("Decisão: No-Go")
