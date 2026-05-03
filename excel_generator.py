@@ -4,12 +4,12 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable
 import re
 
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.utils.cell import coordinate_to_tuple
 
 
 ABAS_FIXAS = {
@@ -32,6 +32,10 @@ ABAS_FIXAS = {
     "README_GERADOR",
 }
 
+
+# =============================================================================
+# FUNÇÕES GERAIS
+# =============================================================================
 
 def sanitizar_nome_arquivo(texto: str) -> str:
     texto = str(texto or "").strip()
@@ -80,36 +84,133 @@ def add_days(base: date | datetime, days: int) -> datetime:
     return to_excel_date(base) + timedelta(days=days)
 
 
-def set_value_next_to_label(ws, labels: list[str], value, max_rows: int = 40, max_cols: int = 12) -> bool:
+# =============================================================================
+# ESCRITA SEGURA EM CÉLULAS MESCLADAS
+# =============================================================================
+
+def _merged_range_for_cell(ws, row: int, col: int):
+    """
+    Retorna o intervalo mesclado ao qual a célula pertence, se existir.
+    """
+    coord = ws.cell(row=row, column=col).coordinate
+
+    for merged_range in ws.merged_cells.ranges:
+        if coord in merged_range:
+            return merged_range
+
+    return None
+
+
+def safe_get_cell(ws, row: int, col: int):
+    """
+    Retorna a célula gravável.
+    Se a célula estiver em uma mesclagem, retorna a célula principal da mesclagem.
+    """
+    merged_range = _merged_range_for_cell(ws, row, col)
+
+    if merged_range:
+        return ws.cell(row=merged_range.min_row, column=merged_range.min_col)
+
+    return ws.cell(row=row, column=col)
+
+
+def safe_set_cell(ws, row: int, col: int, value) -> None:
+    """
+    Escreve em célula normal ou na célula principal de uma mesclagem.
+    Evita erro: 'MergedCell' object attribute 'value' is read-only.
+    """
+    safe_get_cell(ws, row, col).value = value
+
+
+def safe_set_ref(ws, cell_ref: str, value) -> None:
+    """
+    Escreve em referência tipo B3, respeitando célula mesclada.
+    """
+    row, col = coordinate_to_tuple(cell_ref)
+    safe_set_cell(ws, row, col, value)
+
+
+def safe_clear_cell(ws, row: int, col: int) -> None:
+    """
+    Limpa célula sem tentar apagar células secundárias de mesclagem.
+    """
+    merged_range = _merged_range_for_cell(ws, row, col)
+
+    if merged_range:
+        if row == merged_range.min_row and col == merged_range.min_col:
+            ws.cell(row=row, column=col).value = None
+        return
+
+    ws.cell(row=row, column=col).value = None
+
+
+def safe_style_cell(ws, row: int, col: int):
+    """
+    Retorna célula segura para aplicar estilo.
+    """
+    return safe_get_cell(ws, row, col)
+
+
+def set_value_next_to_label(
+    ws,
+    labels: list[str],
+    value,
+    max_rows: int = 40,
+    max_cols: int = 12,
+) -> bool:
     """
     Procura um rótulo na planilha e preenche a célula à direita.
-    Isso deixa o código menos dependente de endereço fixo.
+
+    Compatível com células mescladas:
+    - se o rótulo estiver em uma mesclagem, escreve depois do fim da mesclagem;
+    - se a célula de destino for mesclada, escreve na célula principal.
     """
     labels_norm = [normalizar(label) for label in labels]
 
     for row in range(1, min(ws.max_row, max_rows) + 1):
         for col in range(1, min(ws.max_column, max_cols) + 1):
             cell_value = ws.cell(row=row, column=col).value
+
             if not cell_value:
                 continue
 
             cell_norm = normalizar(cell_value)
+
             if any(label in cell_norm or cell_norm in label for label in labels_norm):
-                ws.cell(row=row, column=col + 1).value = value
+                merged_range = _merged_range_for_cell(ws, row, col)
+
+                if merged_range:
+                    target_col = merged_range.max_col + 1
+                else:
+                    target_col = col + 1
+
+                safe_set_cell(ws, row, target_col, value)
                 return True
 
     return False
 
 
 def preencher_fallback(ws, cell: str, value) -> None:
-    ws[cell] = value
+    """
+    Preenche célula fixa, respeitando mesclagens.
+    """
+    safe_set_ref(ws, cell, value)
 
 
 def preencher_campo(ws, labels: list[str], fallback_cell: str, value) -> None:
+    """
+    Tenta preencher pelo rótulo; se não achar, usa célula fallback.
+    Sempre respeita células mescladas.
+    """
     ok = set_value_next_to_label(ws, labels, value)
+
     if not ok:
         preencher_fallback(ws, fallback_cell, value)
 
+
+# =============================================================================
+# LOCALIZAÇÃO DE ABAS / BANCO
+# =============================================================================
 
 def encontrar_aba_por_codigo(wb, codigo: str) -> str | None:
     if codigo in wb.sheetnames:
@@ -179,6 +280,10 @@ def tool_gate_number(engine_gate_label: str) -> int:
     return 5
 
 
+# =============================================================================
+# PREENCHIMENTO DO MAPA / BANCO
+# =============================================================================
+
 def preencher_mapa_selecao(wb, codigos_selecionados: set[str]) -> str:
     if "Mapa_Selecao" not in wb.sheetnames:
         return ""
@@ -201,7 +306,7 @@ def preencher_mapa_selecao(wb, codigos_selecionados: set[str]) -> str:
 
     if not col_selecionar:
         col_selecionar = ws.max_column + 1
-        ws.cell(row=1, column=col_selecionar).value = "Selecionar"
+        safe_set_cell(ws, 1, col_selecionar, "Selecionar")
 
     bits = []
 
@@ -212,7 +317,7 @@ def preencher_mapa_selecao(wb, codigos_selecionados: set[str]) -> str:
 
         codigo = str(codigo)
         bit = "1" if codigo in codigos_selecionados else "0"
-        ws.cell(row=row, column=col_selecionar).value = int(bit)
+        safe_set_cell(ws, row, col_selecionar, int(bit))
         bits.append(bit)
 
     return "".join(bits)
@@ -235,7 +340,7 @@ def preencher_banco_ferramentas(wb, codigos_selecionados: set[str]) -> None:
 
     if not col_status:
         col_status = ws.max_column + 1
-        ws.cell(row=1, column=col_status).value = "Selecionada"
+        safe_set_cell(ws, 1, col_status, "Selecionada")
 
     for row in range(2, ws.max_row + 1):
         codigo = ws.cell(row=row, column=col_codigo).value
@@ -243,8 +348,17 @@ def preencher_banco_ferramentas(wb, codigos_selecionados: set[str]) -> None:
             continue
 
         codigo = str(codigo)
-        ws.cell(row=row, column=col_status).value = "Sim" if codigo in codigos_selecionados else "Não"
+        safe_set_cell(
+            ws,
+            row,
+            col_status,
+            "Sim" if codigo in codigos_selecionados else "Não",
+        )
 
+
+# =============================================================================
+# DASHBOARD
+# =============================================================================
 
 def preencher_dashboard(
     wb,
@@ -272,10 +386,24 @@ def preencher_dashboard(
     preencher_campo(ws, ["Rota"], "B7", rota)
     preencher_campo(ws, ["Complexidade"], "B8", complexidade)
     preencher_campo(ws, ["Score"], "B9", score)
-    preencher_campo(ws, ["Quantidade de ferramentas", "Ferramentas selecionadas"], "B10", total_ferramentas)
+    preencher_campo(
+        ws,
+        ["Quantidade de ferramentas", "Ferramentas selecionadas"],
+        "B10",
+        total_ferramentas,
+    )
     preencher_campo(ws, ["Código binário", "Codigo binario"], "B11", codigo_binario)
-    preencher_campo(ws, ["Gerado em", "Data de geração"], "B12", datetime.now().strftime("%d/%m/%Y %H:%M"))
+    preencher_campo(
+        ws,
+        ["Gerado em", "Data de geração"],
+        "B12",
+        datetime.now().strftime("%d/%m/%Y %H:%M"),
+    )
 
+
+# =============================================================================
+# CRONOGRAMA
+# =============================================================================
 
 def distribuir_periodos_por_gate(
     data_inicio: date | datetime,
@@ -291,13 +419,11 @@ def distribuir_periodos_por_gate(
 
     total_days = max((end - start).days + 1, 5)
 
-    # Sempre considera os 5 Gates, mesmo que um deles tenha poucas ferramentas.
     gate_counts = {
         gate: max(len(tools_by_gate.get(gate, [])), 1)
         for gate in range(1, 6)
     }
 
-    # Pequeno peso adicional nos Gates 3 e 4 porque normalmente concentram geração/seleção.
     gate_weight_boost = {
         1: 1.0,
         2: 1.1,
@@ -318,7 +444,6 @@ def distribuir_periodos_por_gate(
         for gate in range(1, 6)
     }
 
-    # Ajusta soma para bater exatamente o prazo.
     diff = total_days - sum(raw_durations.values())
     gates_order = [3, 4, 2, 1, 5]
 
@@ -403,7 +528,12 @@ def preencher_cronograma(
     preencher_campo(ws, ["Data final", "Data fim", "Fim"], "B7", format_date(data_fim))
     preencher_campo(ws, ["Duração total", "Duracao total"], "B8", diff_days(data_inicio, data_fim))
     preencher_campo(ws, ["Código binário", "Codigo binario"], "B9", codigo_binario)
-    preencher_campo(ws, ["Quantidade de ferramentas", "Ferramentas selecionadas"], "B10", len(selected_tools))
+    preencher_campo(
+        ws,
+        ["Quantidade de ferramentas", "Ferramentas selecionadas"],
+        "B10",
+        len(selected_tools),
+    )
 
     tools_by_gate: dict[int, list] = defaultdict(list)
 
@@ -427,8 +557,8 @@ def preencher_cronograma(
     ]
 
     for col, header in enumerate(resumo_headers, start=1):
-        cell = ws.cell(row=resumo_start, column=col)
-        cell.value = header
+        safe_set_cell(ws, resumo_start, col, header)
+        cell = safe_style_cell(ws, resumo_start, col)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1F4E78")
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -436,15 +566,16 @@ def preencher_cronograma(
     for gate in range(1, 6):
         row = resumo_start + gate
         gate_start, gate_end = gate_periods[gate]
-        ws.cell(row=row, column=1).value = f"Gate {gate}"
-        ws.cell(row=row, column=2).value = gate_start
-        ws.cell(row=row, column=3).value = gate_end
-        ws.cell(row=row, column=4).value = (gate_end - gate_start).days + 1
-        ws.cell(row=row, column=5).value = len(tools_by_gate.get(gate, []))
-        ws.cell(row=row, column=6).value = "Não iniciado"
 
-        ws.cell(row=row, column=2).number_format = "dd/mm/yyyy"
-        ws.cell(row=row, column=3).number_format = "dd/mm/yyyy"
+        safe_set_cell(ws, row, 1, f"Gate {gate}")
+        safe_set_cell(ws, row, 2, gate_start)
+        safe_set_cell(ws, row, 3, gate_end)
+        safe_set_cell(ws, row, 4, (gate_end - gate_start).days + 1)
+        safe_set_cell(ws, row, 5, len(tools_by_gate.get(gate, [])))
+        safe_set_cell(ws, row, 6, "Não iniciado")
+
+        safe_style_cell(ws, row, 2).number_format = "dd/mm/yyyy"
+        safe_style_cell(ws, row, 3).number_format = "dd/mm/yyyy"
 
     # -------------------------------------------------------------------------
     # Cronograma detalhado por ferramenta
@@ -463,14 +594,13 @@ def preencher_cronograma(
         "Observações",
     ]
 
-    # Limpa área anterior
     for row in range(detail_start, max(ws.max_row + 1, detail_start + 200)):
         for col in range(1, len(headers) + 1):
-            ws.cell(row=row, column=col).value = None
+            safe_clear_cell(ws, row, col)
 
     for col, header in enumerate(headers, start=1):
-        cell = ws.cell(row=detail_start, column=col)
-        cell.value = header
+        safe_set_cell(ws, detail_start, col, header)
+        cell = safe_style_cell(ws, detail_start, col)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1F4E78")
         cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -484,24 +614,23 @@ def preencher_cronograma(
         tool_periods = distribuir_periodos_ferramentas(gate_start, gate_end, tools)
 
         for item, (tool_start, tool_end) in zip(tools, tool_periods):
-            ws.cell(row=row, column=1).value = seq
-            ws.cell(row=row, column=2).value = f"Gate {gate}"
-            ws.cell(row=row, column=3).value = item.tool.id
-            ws.cell(row=row, column=4).value = item.tool.name
-            ws.cell(row=row, column=5).value = tool_start
-            ws.cell(row=row, column=6).value = tool_end
-            ws.cell(row=row, column=7).value = (tool_end - tool_start).days + 1
-            ws.cell(row=row, column=8).value = "Não iniciado"
-            ws.cell(row=row, column=9).value = ""
-            ws.cell(row=row, column=10).value = ""
+            safe_set_cell(ws, row, 1, seq)
+            safe_set_cell(ws, row, 2, f"Gate {gate}")
+            safe_set_cell(ws, row, 3, item.tool.id)
+            safe_set_cell(ws, row, 4, item.tool.name)
+            safe_set_cell(ws, row, 5, tool_start)
+            safe_set_cell(ws, row, 6, tool_end)
+            safe_set_cell(ws, row, 7, (tool_end - tool_start).days + 1)
+            safe_set_cell(ws, row, 8, "Não iniciado")
+            safe_set_cell(ws, row, 9, "")
+            safe_set_cell(ws, row, 10, "")
 
-            ws.cell(row=row, column=5).number_format = "dd/mm/yyyy"
-            ws.cell(row=row, column=6).number_format = "dd/mm/yyyy"
+            safe_style_cell(ws, row, 5).number_format = "dd/mm/yyyy"
+            safe_style_cell(ws, row, 6).number_format = "dd/mm/yyyy"
 
             row += 1
             seq += 1
 
-    # Validação de status
     status_validation = DataValidation(
         type="list",
         formula1='"Não iniciado,Em andamento,Concluído,Atrasado,Pausado"',
@@ -510,19 +639,20 @@ def preencher_cronograma(
     ws.add_data_validation(status_validation)
     status_validation.add(f"H{detail_start + 1}:H{row + 100}")
 
-    # Formatação básica
     thin = Side(style="thin", color="D9E2F3")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     for r in range(resumo_start, resumo_start + 6):
         for c in range(1, 7):
-            ws.cell(row=r, column=c).border = border
-            ws.cell(row=r, column=c).alignment = Alignment(vertical="center")
+            cell = safe_style_cell(ws, r, c)
+            cell.border = border
+            cell.alignment = Alignment(vertical="center")
 
     for r in range(detail_start, row):
         for c in range(1, len(headers) + 1):
-            ws.cell(row=r, column=c).border = border
-            ws.cell(row=r, column=c).alignment = Alignment(vertical="center", wrap_text=True)
+            cell = safe_style_cell(ws, r, c)
+            cell.border = border
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
 
     widths = {
         "A": 8,
@@ -543,6 +673,10 @@ def preencher_cronograma(
     ws.freeze_panes = f"A{detail_start + 1}"
 
 
+# =============================================================================
+# ÍNDICE / RELATÓRIO
+# =============================================================================
+
 def preencher_indice(wb, abas_mantidas: list[str]) -> None:
     if "Indice" not in wb.sheetnames:
         return
@@ -551,16 +685,16 @@ def preencher_indice(wb, abas_mantidas: list[str]) -> None:
 
     for row in range(4, 300):
         for col in range(1, 5):
-            ws.cell(row=row, column=col).value = None
+            safe_clear_cell(ws, row, col)
 
-    ws["A3"] = "Aba"
-    ws["B3"] = "Status"
+    safe_set_ref(ws, "A3", "Aba")
+    safe_set_ref(ws, "B3", "Status")
 
     row = 4
 
     for aba in abas_mantidas:
-        ws.cell(row=row, column=1).value = aba
-        ws.cell(row=row, column=2).value = "Aplicável ao produto"
+        safe_set_cell(ws, row, 1, aba)
+        safe_set_cell(ws, row, 2, "Aplicável ao produto")
         row += 1
 
 
@@ -592,25 +726,29 @@ def preencher_relatorio_consolidado(
 
     for row in range(start_row, max(ws.max_row + 1, start_row + 200)):
         for col in range(1, 6):
-            ws.cell(row=row, column=col).value = None
+            safe_clear_cell(ws, row, col)
 
-    ws.cell(row=start_row, column=1).value = "Gate"
-    ws.cell(row=start_row, column=2).value = "Código"
-    ws.cell(row=start_row, column=3).value = "Ferramenta"
+    safe_set_cell(ws, start_row, 1, "Gate")
+    safe_set_cell(ws, start_row, 2, "Código")
+    safe_set_cell(ws, start_row, 3, "Ferramenta")
 
     for col in range(1, 4):
-        cell = ws.cell(row=start_row, column=col)
+        cell = safe_style_cell(ws, start_row, col)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="1F4E78")
 
     row = start_row + 1
 
     for item in selected_tools:
-        ws.cell(row=row, column=1).value = engine.tool_gate_label(item.tool.id)
-        ws.cell(row=row, column=2).value = item.tool.id
-        ws.cell(row=row, column=3).value = item.tool.name
+        safe_set_cell(ws, row, 1, engine.tool_gate_label(item.tool.id))
+        safe_set_cell(ws, row, 2, item.tool.id)
+        safe_set_cell(ws, row, 3, item.tool.name)
         row += 1
 
+
+# =============================================================================
+# FUNÇÃO PRINCIPAL DE GERAÇÃO
+# =============================================================================
 
 def gerar_planilha_projeto(
     template_path: str | Path,
@@ -705,7 +843,6 @@ def gerar_planilha_projeto(
         engine=engine,
     )
 
-    # Remove abas não aplicáveis.
     for aba in list(wb.sheetnames):
         if aba not in abas_para_manter and len(wb.sheetnames) > 1:
             del wb[aba]
