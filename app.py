@@ -52,6 +52,16 @@ def configurar_pagina() -> None:
             margin-bottom: 1rem;
         }
 
+        .tempo-box {
+            margin-top: 1.1rem;
+            padding: 1rem 1.2rem;
+            border-radius: 12px;
+            border: 1px solid rgba(47,111,237,0.25);
+            background-color: rgba(47,111,237,0.08);
+            font-size: 1.02rem;
+            color: #1f2937;
+        }
+
         div[data-testid="stSidebar"] {
             background-color: #f3f6fa;
         }
@@ -81,6 +91,44 @@ def inicializar_estado() -> None:
     if "page" not in st.session_state:
         st.session_state.page = "inicio"
 
+    if "show_start_dialog" not in st.session_state:
+        st.session_state.show_start_dialog = False
+
+
+@st.dialog("Confirmar início do questionário")
+def confirmar_inicio_questionario() -> None:
+    st.markdown(
+        """
+        O preenchimento do questionário tem duração estimada de **10 minutos**.
+
+        Antes de iniciar, verifique se você tem as informações básicas sobre o produto,
+        como origem da oportunidade, tipo de produto, contato com paciente, esterilidade,
+        fornecedor e nível de inovação.
+        """
+    )
+
+    st.warning(
+        "Deseja iniciar agora? As respostas serão usadas para recomendar o pacote "
+        "mínimo de ferramentas para geração do conceito."
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("✅ Sim, iniciar agora", type="primary", use_container_width=True):
+            st.session_state.show_start_dialog = False
+            st.session_state.page = "questionario"
+            st.rerun()
+
+    with col2:
+        if st.button("Cancelar", use_container_width=True):
+            st.session_state.show_start_dialog = False
+            st.rerun()
+
+
+def abrir_confirmacao_questionario() -> None:
+    st.session_state.show_start_dialog = True
+
 
 def render_sidebar() -> None:
     with st.sidebar:
@@ -96,11 +144,11 @@ def render_sidebar() -> None:
 
         if st.button("🏠 Tela inicial", use_container_width=True):
             st.session_state.page = "inicio"
+            st.session_state.show_start_dialog = False
             st.rerun()
 
         if st.button("🧭 Abrir questionário", use_container_width=True):
-            st.session_state.page = "questionario"
-            st.rerun()
+            abrir_confirmacao_questionario()
 
 
 def render_inicio() -> None:
@@ -127,11 +175,19 @@ a tomada de decisão, sem entrar na fase de projeto detalhado.
         unsafe_allow_html=True,
     )
 
+    st.markdown(
+        """
+<div class="tempo-box">
+⏱️ <strong>Tempo estimado para preenchimento:</strong> aproximadamente 10 minutos.
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.write("")
 
     if st.button("🚀 Iniciar questionário", type="primary", use_container_width=True):
-        st.session_state.page = "questionario"
-        st.rerun()
+        abrir_confirmacao_questionario()
 
 
 def main() -> None:
@@ -143,6 +199,9 @@ def main() -> None:
         render_questionario()
     else:
         render_inicio()
+
+    if st.session_state.show_start_dialog:
+        confirmar_inicio_questionario()
 
 
 if __name__ == "__main__":
