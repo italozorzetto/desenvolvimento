@@ -750,6 +750,36 @@ def preencher_relatorio_consolidado(
 # FUNÇÃO PRINCIPAL DE GERAÇÃO
 # =============================================================================
 
+def ocultar_abas_nao_aplicaveis(wb, abas_para_manter: set[str]) -> list[str]:
+    """
+    Oculta abas não aplicáveis em vez de deletar.
+
+    Isso evita corrupção do arquivo Excel quando a planilha-mãe possui:
+    - tabelas estruturadas;
+    - validações de dados;
+    - nomes definidos;
+    - fórmulas;
+    - gráficos;
+    - referências entre abas.
+    """
+    abas_visiveis = []
+
+    for aba in wb.sheetnames:
+        ws = wb[aba]
+
+        if aba in abas_para_manter:
+            ws.sheet_state = "visible"
+            abas_visiveis.append(aba)
+        else:
+            ws.sheet_state = "hidden"
+
+    # Garante que pelo menos uma aba fique visível.
+    if not abas_visiveis and wb.sheetnames:
+        wb[wb.sheetnames[0]].sheet_state = "visible"
+        abas_visiveis.append(wb.sheetnames[0])
+
+    return abas_visiveis
+
 def gerar_planilha_projeto(
     template_path: str | Path,
     nome_cronograma: str,
