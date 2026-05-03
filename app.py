@@ -7,8 +7,9 @@ import streamlit as st
 from questionario import render_questionario
 
 
-APP_TITLE = "Gestor de Conceitos Médicos"
+APP_TITLE = "Sistema para Geração de Conceitos de Dispositivos Médicos"
 APP_SUBTITLE = "Idealização → Conceito Aprovado"
+SIDEBAR_TITLE = "Geração de Conceitos"
 LOGO_PATH = Path("logo-msb.png")
 
 
@@ -30,28 +31,25 @@ def configurar_pagina() -> None:
         }
 
         .hero-card {
-            padding: 2.4rem;
+            padding: 2.4rem 2.8rem;
             border-radius: 18px;
             border: 1px solid rgba(120,120,120,0.25);
             background: linear-gradient(135deg, rgba(47,111,237,0.10), rgba(47,111,237,0.02));
         }
 
         .hero-card h1 {
-            font-size: 2.8rem;
-            margin-bottom: 1.2rem;
+            font-size: 2.55rem;
+            margin-top: 0;
+            margin-bottom: 1.4rem;
             color: #1f2937;
+            line-height: 1.15;
         }
 
         .hero-card p {
             font-size: 1.08rem;
-            line-height: 1.7;
+            line-height: 1.65;
             color: #111827;
-        }
-
-        .sidebar-logo {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 0.6rem;
+            margin-bottom: 1rem;
         }
 
         div[data-testid="stSidebar"] {
@@ -65,7 +63,13 @@ def configurar_pagina() -> None:
 
         div.stButton > button {
             border-radius: 10px;
-            height: 2.8rem;
+            min-height: 2.8rem;
+            font-weight: 500;
+        }
+
+        div[data-testid="stSidebar"] img {
+            border-radius: 8px;
+            margin-bottom: 1rem;
         }
         </style>
         """,
@@ -85,7 +89,7 @@ def render_sidebar() -> None:
         else:
             st.warning("Logo não encontrado: logo-msb.png")
 
-        st.title("Gestor de Conceitos")
+        st.title(SIDEBAR_TITLE)
         st.caption(APP_SUBTITLE)
 
         st.write("")
@@ -102,26 +106,23 @@ def render_sidebar() -> None:
 def render_inicio() -> None:
     st.markdown(
         """
-        <div class="hero-card">
-            <h1>Gestor de Conceitos Médicos</h1>
-
-            <p>
-                Sistema adaptativo para apoiar a fase de idealização, análise inicial
-                e seleção de conceito em novos produtos médicos.
-            </p>
-
-            <p>
-                A ferramenta classifica o produto conforme sua estratégia de desenvolvimento,
-                origem da oportunidade, responsabilidade da empresa, contato com paciente,
-                esterilidade, fornecedor, nível de inovação, rota conceitual e principais
-                incertezas.
-            </p>
-
-            <p>
-                Ao final, o sistema recomenda um pacote enxuto de ferramentas para apoiar
-                a tomada de decisão, sem entrar na fase de projeto detalhado.
-            </p>
-        </div>
+<div class="hero-card">
+<h1>Sistema para Geração de Conceitos de Dispositivos Médicos</h1>
+<p>
+Sistema adaptativo para apoiar a fase de idealização, análise inicial
+e seleção de conceito em novos produtos médicos.
+</p>
+<p>
+A ferramenta classifica o produto conforme sua estratégia de desenvolvimento,
+origem da oportunidade, responsabilidade da empresa, contato com paciente,
+esterilidade, fornecedor, nível de inovação, rota conceitual e principais
+incertezas.
+</p>
+<p>
+Ao final, o sistema recomenda um pacote enxuto de ferramentas para apoiar
+a tomada de decisão, sem entrar na fase de projeto detalhado.
+</p>
+</div>
         """,
         unsafe_allow_html=True,
     )
