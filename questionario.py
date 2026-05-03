@@ -5,6 +5,11 @@ from io import StringIO
 import pandas as pd
 import streamlit as st
 
+from pathlib import Path
+from datetime import date
+
+from excel_generator import gerar_planilha_projeto
+
 from med_concept_engine import (
     MedConceptEngine,
     ToolPriority,
@@ -294,7 +299,91 @@ def render_resultados(engine: MedConceptEngine) -> None:
         else:
             st.info("As ferramentas candidatas ocultas são exibidas apenas para revisão interna.")
 
-    st.header("Relatório e Downloads")
+        st.subheader("Planilha do Projeto")
+
+    with st.container(border=True):
+        nome_cronograma = st.text_input(
+            "Nome do cronograma",
+            placeholder="Ex.: Cronograma Conceito Cateter OEM",
+            key="xlsx_nome_cronograma",
+        )
+
+        nome_projeto = st.text_input(
+            "Nome do projeto",
+            placeholder="Ex.: Desenvolvimento Conceitual — Cateter OEM",
+            key="xlsx_nome_projeto",
+        )
+
+        nome_produto = st.text_input(
+            "Nome base do produto",
+            placeholder="Ex.: Cateter venoso central",
+            key="xlsx_nome_produto",
+        )
+
+        col_dt1, col_dt2 = st.columns(2)
+
+        with col_dt1:
+            data_inicio = st.date_input(
+                "Data de início",
+                value=date.today(),
+                format="DD/MM/YYYY",
+                key="xlsx_data_inicio",
+            )
+
+        with col_dt2:
+            data_fim = st.date_input(
+                "Data final",
+                value=date.today(),
+                format="DD/MM/YYYY",
+                key="xlsx_data_fim",
+            )
+
+        template_path = (
+            Path("templates")
+            / "Planilha_Mae_Inteligente_Com_Cronograma.xlsx"
+        )
+
+        campos_ok = all([
+            nome_cronograma.strip(),
+            nome_projeto.strip(),
+            nome_produto.strip(),
+            data_inicio,
+            data_fim,
+        ])
+
+        if data_fim < data_inicio:
+            st.error("A data final não pode ser anterior à data de início.")
+        elif not campos_ok:
+            st.info(
+                "Informe nome do cronograma, nome do projeto, nome base do produto, "
+                "data de início e data final para gerar a planilha personalizada."
+            )
+        else:
+            try:
+                planilha_bytes, nome_arquivo = gerar_planilha_projeto(
+                    template_path=template_path,
+                    nome_cronograma=nome_cronograma,
+                    nome_projeto=nome_projeto,
+                    nome_produto=nome_produto,
+                    data_inicio=data_inicio,
+                    data_fim=data_fim,
+                    rota=engine.project_route(),
+                    complexidade=engine.profile.complexity.name,
+                    score=engine.profile.complexity_score,
+                    selected_tools=selected,
+                    engine=engine,
+                )
+
+                st.download_button(
+                    label="📗 Baixar planilha do projeto",
+                    data=planilha_bytes,
+                    file_name=nome_arquivo,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+
+            except Exception as exc:
+                st.error(f"Erro ao gerar planilha do projeto: {exc}")
 
     # Relatório e JSON seguem o pacote visível, sem Go/No-Go como ferramenta comum.
     # As matrizes Go/No-Go devem entrar futuramente como seção própria do relatório.
