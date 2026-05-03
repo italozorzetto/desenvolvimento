@@ -58,9 +58,6 @@ def render_questionario() -> None:
     init_engine()
     engine: MedConceptEngine = st.session_state.engine
 
-    st.title("Questionário Adaptativo")
-    st.caption("Responda as perguntas. O sistema monta um pacote mínimo inteligente, evitando excesso de ferramentas em projetos simples.")
-
     col_a, col_b, col_c = st.columns([1, 1, 2])
     with col_a:
         if st.button("🔄 Reiniciar questionário", use_container_width=True):
@@ -84,7 +81,9 @@ def render_questionario() -> None:
         render_resultados(engine)
         return
 
-    st.subheader(f"{current.id} — {current.text}")
+    # Mostra somente o texto da pergunta, sem Q01, Q02 etc.
+    st.subheader(current.text)
+
     if current.help_text:
         st.info(current.help_text)
 
